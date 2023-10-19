@@ -1,0 +1,29 @@
+{
+  "type": "record",
+  "name": "Record",
+  "fields": [
+    {
+      "name": "name1",
+      "type": "string"
+    },
+    {
+      "name": "name2",
+      "type": "string"
+    },
+    {
+      "name": "age",
+      "type": "long"
+    },
+    {
+      "name": "is_adult",
+      "type": "boolean"
+    },
+    {
+      "name": "colleagues",
+      "type": {
+        "type": "array",
+        "items": "string"
+      }
+    }
+  ]
+}
