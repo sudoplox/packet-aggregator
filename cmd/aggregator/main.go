@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/linkedin/goavro/v2"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"packet-aggregator/pkg/aggregator"
 	avroHelpers "packet-aggregator/pkg/helpers/avro"
 	"time"
@@ -12,13 +14,13 @@ import (
 
 func main() {
 	server := []string{"kafka:9092"}
-	schemaFile := "template.avro"
+	schemaFile := "template.avsc"
 	codec, err := avroHelpers.GetCodec(schemaFile)
 	if err != nil {
 		return
 	}
 	aggr := aggregator.CreateAggregator[string, string](
-		KeyValueExtractorStruct[string, string]{
+		KeyValueExtractorStruct1[string, string]{
 			codec: codec,
 			key:   "name1",
 			value: "name2",
@@ -32,7 +34,7 @@ func main() {
 		TimeDuration: 2 * time.Minute,
 		MessageCount: 2,
 
-		ConsumerConfig: aggregator.ConsumerConfig{
+		ConsumerConfig: aggregator.KafkaConsumerConfig{
 			TopicNames:    []string{"aggregator_test"},
 			PollTimeoutMs: 10,
 
@@ -47,7 +49,8 @@ func main() {
 			MaxPollIntervalMs:              600000,
 		},
 	}
-	aggr.StartKafkaConsumer(config)
+	aggr.StartConsumer(config)
+	//aggr.StartKafkaConsumer(config)
 
 }
 
@@ -56,6 +59,13 @@ type KeyValueExtractorStruct[K string, V string] struct {
 	key   string
 	value string
 }
+
+type KeyValueExtractorStruct1[K string, V string] struct {
+	codec *goavro.Codec
+	key   string
+	value string
+}
+
 type DelegatorStruct[K string, V string] struct {
 }
 type DLQHandlerStruct[K string, V string] struct {
@@ -65,7 +75,15 @@ type RetryHandlerStruct[K string, V string] struct {
 type RetryHandlerStructNew[K string, V string] struct {
 }
 
+type Abc struct {
+}
+
+func (abc KeyValueExtractorStruct1[K, V]) Extract(source any) (key K, value V, err error) {
+	return "", "", nil
+}
+
 func (kve KeyValueExtractorStruct[K, V]) Extract(source any) (key K, value V, err error) {
+	//V.Extract(source)
 	codec := kve.codec
 	if kafkaMsg, ok := source.(*kafka.Message); ok {
 		decodedMsg, err := avroHelpers.TransformAvro(kafkaMsg.Value, codec, avroHelpers.NativeFromBinary)
@@ -73,17 +91,22 @@ func (kve KeyValueExtractorStruct[K, V]) Extract(source any) (key K, value V, er
 			fmt.Println("Extract + TransformAvro: ", err.Error())
 			return key, value, err
 		}
-		if decodedMsgMap, ok := decodedMsg.(map[string]any); ok {
-			if key, ok = decodedMsgMap[kve.key].(K); ok {
-				if value, ok = decodedMsgMap[kve.value].(V); ok {
-					return key, value, nil
-				} else {
-					err = errors.New(fmt.Sprintf("Error with value: %v | MessageMap: %v", kve.value, decodedMsgMap))
-				}
-			} else {
-				err = errors.New(fmt.Sprintf("Error with key: %v | MessageMap: %v", kve.key, decodedMsgMap))
-			}
-		}
+		//if decodedMsgMap, ok := decodedMsg.(map[string]any); ok {
+		//	if key, ok = decodedMsgMap[kve.key].(K); ok {
+		//		if value, ok = decodedMsgMap[kve.value].(V); ok {
+		//			return key, value, nil
+		//		} else {
+		//			err = errors.New(fmt.Sprintf("Error with value: %v | MessageMap: %v", kve.value, decodedMsgMap))
+		//		}
+		//	} else {
+		//		err = errors.New(fmt.Sprintf("Error with key: %v | MessageMap: %v", kve.key, decodedMsgMap))
+		//	}
+		//}
+		fmt.Println(decodedMsg)
+	} else if rmqMessage, ok := source.(amqp.Delivery); ok {
+		mp := make(map[string]interface{})
+		err := json.Unmarshal(rmqMessage.Body, &mp)
+		fmt.Println(err.Error())
 	} else {
 		err = errors.New(fmt.Sprintf("Error with source type assertion: %v", source))
 	}

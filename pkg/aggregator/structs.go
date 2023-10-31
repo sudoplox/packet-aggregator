@@ -4,10 +4,9 @@ import (
 	"time"
 )
 
-type ConsumerConfig struct {
-	TopicNames    []string
-	PollTimeoutMs int
-
+type KafkaConsumerConfig struct {
+	TopicNames                     []string
+	PollTimeoutMs                  int
 	BootstrapServers               []string `json:"bootstrap.servers"`
 	GroupId                        string   `json:"group.id"`
 	AutoOffsetReset                string   `json:"auto.offset.reset"`
@@ -19,6 +18,12 @@ type ConsumerConfig struct {
 	MaxPollIntervalMs              int      `json:"max.poll.interval.ms"`
 }
 
+type RmqConsumerConfig struct {
+	BootstrapServer string
+	QueueName       string
+	ConsumerAutoAck bool
+}
+
 type ProducerConfig struct {
 	BootstrapServers []string `json:"bootstrap.servers"`
 	TopicName        string
@@ -28,8 +33,8 @@ type AggrConfig struct {
 	TimeDuration time.Duration
 	MessageCount int
 
-	// Kafka Consumer Config
-	ConsumerConfig ConsumerConfig
+	// Consumer Config   --- KafkaConsumerConfig for kafka and RmqConsumerConfig for RMQ
+	ConsumerConfig interface{}
 }
 
 type AggrObject[K comparable, V any] struct {
