@@ -384,6 +384,8 @@ func (aggr AggrObject[K, V]) Start() error {
 				}
 				err = aggr.ConsumerConfig.CommitMessages()
 			}
+			timer.Reset(timeOutDuration)
+			messagesMap = make(map[K][]V)
 		default:
 			msg, err := aggr.ConsumerConfig.GetOneMessage()
 			if err != nil {
@@ -415,6 +417,8 @@ func (aggr AggrObject[K, V]) Start() error {
 					logger.Error("Error while commit the messages", zap.Any("error", err))
 					return err
 				}
+				timer.Reset(timeOutDuration)
+				messagesMap = make(map[K][]V)
 			}
 		}
 	}
