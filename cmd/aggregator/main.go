@@ -7,19 +7,37 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/linkedin/goavro/v2"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.uber.org/zap"
+	"os"
+	"os/signal"
 	"packet-aggregator/pkg/aggregator"
+	kafka2 "packet-aggregator/pkg/consumers/kafka"
 	avroHelpers "packet-aggregator/pkg/helpers/avro"
+	"syscall"
 	"time"
 )
 
 func main() {
 	server := []string{"kafka:9092"}
-	schemaFile := "template.avsc"
+	schemaFile := "/Users/mmt9761/Code/Go/src/awesomeAggregator/temp/packet-aggregator/template.avsc"
 	codec, err := avroHelpers.GetCodec(schemaFile)
 	if err != nil {
 		return
 	}
-	aggr := aggregator.CreateAggregator[string, string](
+
+	//t := struct {
+	//	T int
+	//}{}
+	//zapper :=
+	z := zap.NewDevelopmentConfig()
+	z.InitialFields = map[string]interface{}{
+		"package": "aggregator",
+	}
+	logger, _ := z.Build()
+	//logger, _ := zap.NewProduction()
+	//logger.WithOptions()
+
+	var aggr = aggregator.CreateAggregator[string, string](
 		KeyValueExtractorStruct1[string, string]{
 			codec: codec,
 			key:   "name1",
@@ -28,13 +46,12 @@ func main() {
 		DelegatorStruct[string, string]{},
 		RetryHandlerStruct[string, string]{},
 		DLQHandlerStruct[string, string]{},
-	)
-
-	config := aggregator.AggrConfig{
-		TimeDuration: 2 * time.Minute,
-		MessageCount: 2,
-
-		ConsumerConfig: aggregator.KafkaConsumerConfig{
+		AggregatorConfigStruct{
+			TimeDuration: 4 * time.Minute,
+			MessageCount: 10,
+			Logger:       logger,
+		},
+		&kafka2.KafkaConsumerConfig{
 			TopicNames:    []string{"aggregator_test"},
 			PollTimeoutMs: 10,
 
@@ -48,8 +65,33 @@ func main() {
 			EnableAutoCommit:               false,
 			MaxPollIntervalMs:              600000,
 		},
-	}
-	aggr.StartConsumer(config)
+
+		//ConsumerStruct{},
+	)
+
+	err = aggr.Start()
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func(sigchan chan os.Signal) {
+		//runForInterrupts := true
+		for {
+			select {
+			case _ = <-sigchan:
+				err := aggr.Stop()
+				panic(err)
+			}
+		}
+	}(sigchan)
+
+	//config := aggregator.AggrConfig{
+	//	TimeDuration: 2 * time.Minute,
+	//	MessageCount: 2,
+	//
+	//	ConsumerConfig: kafka2.KafkaConsumerConfig{
+	//	},
+	//}
+	//aggr.StartConsumer(config)
 	//aggr.StartKafkaConsumer(config)
 
 }
@@ -74,9 +116,28 @@ type RetryHandlerStruct[K string, V string] struct {
 }
 type RetryHandlerStructNew[K string, V string] struct {
 }
-
-type Abc struct {
+type AggregatorConfigStruct struct {
+	TimeDuration time.Duration
+	MessageCount int
+	Logger       *zap.Logger
 }
+
+//type ConsumerConfig struct {
+//	Consumer interface{}
+//	//RmqConsumer   aggregator.RmqConsumerConfig
+//}
+
+//type T struct {
+//}
+//
+//func (c T) Start() error {
+//	return nil
+//}
+//
+//func (c T) Stop() error {
+//	//TODO implement me
+//	panic("implement me")
+//}
 
 func (abc KeyValueExtractorStruct1[K, V]) Extract(source any) (key K, value V, err error) {
 	return "", "", nil
@@ -129,4 +190,12 @@ func (kve RetryHandlerStructNew[K, V]) RetryHandle(source any) (err error) {
 }
 func (kve DLQHandlerStruct[K, V]) DLQHandle(source any) (err error) {
 	return nil
+}
+
+func (kve AggregatorConfigStruct) GetAggregatorConfig() (int, time.Duration) {
+	return kve.MessageCount, kve.TimeDuration
+}
+
+func (kve AggregatorConfigStruct) GetLogger() *zap.Logger {
+	return kve.Logger
 }
