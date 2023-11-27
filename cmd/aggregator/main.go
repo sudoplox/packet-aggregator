@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"packet-aggregator/pkg/aggregator"
 	kafka2 "packet-aggregator/pkg/consumers/kafka"
+	"packet-aggregator/pkg/consumers/rabbitmq"
 	avroHelpers "packet-aggregator/pkg/helpers/avro"
 	"syscall"
 	"time"
@@ -37,7 +38,7 @@ func main() {
 	//logger, _ := zap.NewProduction()
 	//logger.WithOptions()
 
-	var aggr = aggregator.CreateAggregator[string, string](
+	aggr, err := aggregator.CreateAggregator[string, string](
 		KeyValueExtractorStruct1[string, string]{
 			codec: codec,
 			key:   "name1",
@@ -50,26 +51,31 @@ func main() {
 			TimeDuration: 4 * time.Minute,
 			MessageCount: 10,
 			Logger:       logger,
-		},
-		&kafka2.KafkaConsumerConfig{
-			TopicNames:    []string{"aggregator_test"},
-			PollTimeoutMs: 10,
 
-			BootstrapServers:               server,
-			GroupId:                        "aggregator-test-1",
-			AutoOffsetReset:                "earliest",
-			HeartbeatIntervalMs:            3000,
-			SessionTimeoutMs:               30000,
-			TopicMetadataRefreshIntervalMs: 36000,
-			PartitionAssignmentStrategy:    "range",
-			EnableAutoCommit:               false,
-			MaxPollIntervalMs:              600000,
-		},
+			ConsumerType: "kafka",
 
-		//ConsumerStruct{},
+			KafkaTopicNames:                     []string{"aggregator_test"},
+			KafkaPollTimeOutMs:                  10,
+			KafkaBootStrapServers:               server,
+			KafkaGroupId:                        "aggregator-test-1",
+			KafkaAutoOffsetReset:                "earliest",
+			KafkaHeartBeatIntervalMs:            3000,
+			KafkaSessionTimeOutMs:               30000,
+			KafkaTopicMetadataRefreshIntervalMs: 36000,
+			KafkaPartitionAssignmentStrategy:    "range",
+			KafkaEnableAutoCommit:               false,
+			KafkaMaxPollIntervalMs:              600000,
+		},
 	)
+	if err != nil {
+		logger.Error(err.Error())
+		return
+	}
 
 	err = aggr.Start()
+	if err != nil {
+
+	}
 	sigchan := make(chan os.Signal, 1)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -120,6 +126,27 @@ type AggregatorConfigStruct struct {
 	TimeDuration time.Duration
 	MessageCount int
 	Logger       *zap.Logger
+	ConsumerType string // "Kafka" or "Rabbitmq" or anything else specify
+	//Kafka
+	KafkaTopicNames                     []string
+	KafkaBootStrapServers               []string
+	KafkaPollTimeOutMs                  int
+	KafkaGroupId                        string
+	KafkaAutoOffsetReset                string
+	KafkaHeartBeatIntervalMs            int
+	KafkaSessionTimeOutMs               int
+	KafkaTopicMetadataRefreshIntervalMs int
+	KafkaPartitionAssignmentStrategy    string
+	KafkaEnableAutoCommit               bool
+	KafkaMaxPollIntervalMs              int
+
+	// RabbitMQ
+	RabbitMQBootstrapServer string `json:"bootstrapServer"`
+	RabbitMQQueueName       string `json:"queueName"`
+	RabbitMQConsumerAutoAck bool   `json:"consumerAutoAck"`
+
+	// Any Other Consumer
+	Consumer any
 }
 
 //type ConsumerConfig struct {
@@ -192,8 +219,48 @@ func (kve DLQHandlerStruct[K, V]) DLQHandle(source any) (err error) {
 	return nil
 }
 
-func (kve AggregatorConfigStruct) GetAggregatorConfig() (int, time.Duration) {
-	return kve.MessageCount, kve.TimeDuration
+func (kve AggregatorConfigStruct) CreateConsumerFromConfig() (aggregator.Consumer, error) {
+	if kve.ConsumerType == "kafka" {
+		consumer := &kafka2.KafkaConsumerConfig{
+			TopicNames:                     kve.KafkaTopicNames,
+			PollTimeoutMs:                  kve.KafkaPollTimeOutMs,
+			BootstrapServers:               kve.KafkaBootStrapServers,
+			GroupId:                        kve.KafkaGroupId,
+			AutoOffsetReset:                kve.KafkaAutoOffsetReset,
+			HeartbeatIntervalMs:            kve.KafkaHeartBeatIntervalMs,
+			SessionTimeoutMs:               kve.KafkaSessionTimeOutMs,
+			TopicMetadataRefreshIntervalMs: kve.KafkaTopicMetadataRefreshIntervalMs,
+			PartitionAssignmentStrategy:    kve.KafkaPartitionAssignmentStrategy,
+			EnableAutoCommit:               kve.KafkaEnableAutoCommit,
+			MaxPollIntervalMs:              kve.KafkaMaxPollIntervalMs,
+		}
+		return interface{}(consumer).(aggregator.Consumer), nil
+	} else if kve.ConsumerType == "rabbitmq" {
+		consumer := &rabbitmq.RmqConsumerConfig{
+			BootstrapServer: kve.RabbitMQBootstrapServer,
+			QueueName:       kve.RabbitMQQueueName,
+			ConsumerAutoAck: kve.RabbitMQConsumerAutoAck,
+		}
+		return interface{}(consumer).(aggregator.Consumer), nil
+	} else if kve.ConsumerType == "" {
+		kve.Logger.Error("ConsumerType empty")
+		return nil, errors.New("ConsumerType empty")
+	}
+
+	if val, ok := interface{}(kve.Consumer).(aggregator.Consumer); ok {
+		kve.Logger.Info("Provided consumer " + kve.ConsumerType + " implements all the methods required for aggregator.Consumer interface{}")
+		return val, nil
+	} else {
+		kve.Logger.Error("Provided consumer " + kve.ConsumerType + " doesn't implements all the methods required for aggregator.Consumer interface{}")
+		return nil, errors.New("Provided consumer " + kve.ConsumerType + " doesn't implements all the methods required for aggregator.Consumer interface{}")
+	}
+}
+func (kve AggregatorConfigStruct) GetAggregatorConfig() aggregator.AggregationConfig {
+	return aggregator.AggregationConfig{
+		TimeDuration: kve.TimeDuration,
+		MessageCount: kve.MessageCount,
+		Logger:       kve.Logger,
+	}
 }
 
 func (kve AggregatorConfigStruct) GetLogger() *zap.Logger {

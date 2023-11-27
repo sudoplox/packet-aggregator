@@ -16,6 +16,12 @@ type ProducerConfig struct {
 	TopicName        string
 }
 
+type AggregationConfig struct {
+	TimeDuration time.Duration
+	MessageCount int
+	Logger       *zap.Logger
+}
+
 type AggrObject[K comparable, V any] struct {
 	KeyValueExtractor[K, V]
 	Delegator[K, V]
@@ -23,12 +29,13 @@ type AggrObject[K comparable, V any] struct {
 	// DLQHandler : Dead Letter Queue implementation
 	DLQHandler[K, V]
 	AggregatorConfig
-	ConsumerConfig
+	Consumer
 }
 
-type ConsumerConfig interface {
+type Consumer interface {
 	StartConsumer() (any, error)
 	GetOneMessage() (any, error)
+	GetMessages(int) (any, error)
 	CommitMessages() error
 	StopConsumer() error
 }
@@ -47,7 +54,8 @@ type DLQHandler[K comparable, V any] interface {
 }
 
 type AggregatorConfig interface {
-	GetAggregatorConfig() (int, time.Duration)
+	GetAggregatorConfig() AggregationConfig
+	CreateConsumerFromConfig() (Consumer, error)
 	GetLogger() *zap.Logger
 }
 

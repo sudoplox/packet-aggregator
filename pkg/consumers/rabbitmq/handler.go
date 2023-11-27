@@ -74,6 +74,19 @@ func (rmq *RmqConsumerConfig) GetOneMessage() (any, error) {
 	}
 	return nil, nil
 }
+
+func (rmq *RmqConsumerConfig) GetMessages(size int) (any, error) {
+	messagesChan := *(rmq.messages)
+	messages := make([]amqp.Delivery, 0)
+	for message := range messagesChan {
+		rmq.currentMessage = &message
+		messages = append(messages, message)
+		if len(messages) >= size {
+			return messages, nil
+		}
+	}
+	return nil, nil
+}
 func (rmq *RmqConsumerConfig) CommitMessages() error {
 	if !rmq.ConsumerAutoAck {
 		err := (*rmq.currentMessage).Ack(true)

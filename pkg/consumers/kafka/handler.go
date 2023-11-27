@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Split the below function to new and start
 func (kafka *KafkaConsumerConfig) StartConsumer() (any, error) {
 	//logger, _ := zap.NewProduction()
 	c, err := kafka2.NewConsumer(&kafka2.ConfigMap{
@@ -39,21 +40,57 @@ func (kafka *KafkaConsumerConfig) StartConsumer() (any, error) {
 }
 
 func (kafka *KafkaConsumerConfig) GetOneMessage() (any, error) {
-	if kafka.consumer == nil {
-		_, err := kafka.StartConsumer()
-		if err != nil {
-			return nil, err
-		}
-	}
+	//if kafka.consumer == nil {
+	//	_, err := kafka.StartConsumer()
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//}
 
 	for {
 		event := kafka.consumer.Poll(kafka.PollTimeoutMs)
 		if event == nil {
-			continue
+			return nil, errors.New("Didn't receive any messages in the defined polling interval " + fmt.Sprintf("%d", kafka.PollTimeoutMs))
 		} else {
 			switch e := event.(type) {
 			case *kafka2.Message:
 				return e, nil
+			case kafka2.Error:
+				return nil, errors.New("Kafka error : " + e.Error())
+			case kafka2.PartitionEOF:
+				fmt.Printf("%% Reached %v\n", e)
+				continue
+			default:
+				continue
+			}
+		}
+	}
+}
+
+func (kafka *KafkaConsumerConfig) GetMessages(size int) (any, error) {
+	//if kafka.consumer == nil {
+	//	_, err := kafka.StartConsumer()
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//}
+	messages := make([]*kafka2.Message, 0)
+	for {
+		event := kafka.consumer.Poll(kafka.PollTimeoutMs)
+		if event == nil {
+			if len(messages) > 0 {
+				return messages, nil
+			}
+			return nil, errors.New("Didn't receive any messages in the defined polling interval " + fmt.Sprintf("%d", kafka.PollTimeoutMs))
+		} else {
+			switch e := event.(type) {
+			case *kafka2.Message:
+				messages = append(messages, e)
+				if size >= len(messages) {
+					return messages, nil
+				} else {
+					continue
+				}
 			case kafka2.Error:
 				return nil, errors.New("Kafka error : " + e.Error())
 			case kafka2.PartitionEOF:

@@ -5,15 +5,23 @@ import (
 	"time"
 )
 
-func CreateAggregator[K comparable, V any](extract KeyValueExtractor[K, V], delegate Delegator[K, V], retry RetryHandler[K, V], handle DLQHandler[K, V], config AggregatorConfig, consumerConfig ConsumerConfig) AggrObject[K, V] {
-	return AggrObject[K, V]{
+func CreateAggregator[K comparable, V any](extract KeyValueExtractor[K, V], delegate Delegator[K, V], retry RetryHandler[K, V], handle DLQHandler[K, V], config AggregatorConfig) (AggrObject[K, V], error) {
+
+	aggr := AggrObject[K, V]{
 		extract,
 		delegate,
 		retry,
 		handle,
 		config,
-		consumerConfig,
+		nil,
 	}
+	consumer, err := aggr.AggregatorConfig.CreateConsumerFromConfig()
+	if err != nil {
+		aggr.AggregatorConfig.GetLogger().Error(err.Error())
+		return AggrObject[K, V]{}, err
+	}
+	aggr.Consumer = consumer
+	return aggr, nil
 }
 
 // type rmqMessage []byte
@@ -356,16 +364,16 @@ func CreateAggregator[K comparable, V any](extract KeyValueExtractor[K, V], dele
 func (aggr AggrObject[K, V]) Start() error {
 	logger := aggr.AggregatorConfig.GetLogger()
 	logger.Info("Staring Aggregator")
-	_, err := aggr.ConsumerConfig.StartConsumer()
+	_, err := aggr.Consumer.StartConsumer()
 	if err != nil {
 		logger.Error("Error while starting the Aggregator, err : " + err.Error())
 		return err
 	}
 
-	messageCount, timeOutDuration := aggr.AggregatorConfig.GetAggregatorConfig()
+	aggregationConfig := aggr.AggregatorConfig.GetAggregatorConfig()
 	messagesMap := make(map[K][]V)
 
-	timer := time.NewTimer(timeOutDuration)
+	timer := time.NewTimer(aggregationConfig.TimeDuration)
 
 	for {
 		select {
@@ -382,12 +390,12 @@ func (aggr AggrObject[K, V]) Start() error {
 						}
 					}
 				}
-				err = aggr.ConsumerConfig.CommitMessages()
+				err = aggr.Consumer.CommitMessages()
 			}
-			timer.Reset(timeOutDuration)
+			timer.Reset(aggr.AggregatorConfig.GetAggregatorConfig().TimeDuration)
 			messagesMap = make(map[K][]V)
 		default:
-			msg, err := aggr.ConsumerConfig.GetOneMessage()
+			msg, err := aggr.Consumer.GetMessages(1)
 			if err != nil {
 				logger.Error("Error while getting the message from consumer ", zap.Any("message", msg),
 					zap.Any("error", err))
@@ -401,7 +409,7 @@ func (aggr AggrObject[K, V]) Start() error {
 			}
 			messagesMap[key] = append(messagesMap[key], val)
 
-			if len(messagesMap) >= messageCount {
+			if len(messagesMap) >= aggr.AggregatorConfig.GetAggregatorConfig().MessageCount {
 				err = aggr.Delegator.Delegate(messagesMap)
 				if err != nil {
 					err = aggr.RetryHandler.RetryHandle(messagesMap)
@@ -412,12 +420,12 @@ func (aggr AggrObject[K, V]) Start() error {
 						}
 					}
 				}
-				err = aggr.ConsumerConfig.CommitMessages()
+				err = aggr.Consumer.CommitMessages()
 				if err != nil {
 					logger.Error("Error while commit the messages", zap.Any("error", err))
 					return err
 				}
-				timer.Reset(timeOutDuration)
+				timer.Reset(aggr.AggregatorConfig.GetAggregatorConfig().TimeDuration)
 				messagesMap = make(map[K][]V)
 			}
 		}
@@ -426,7 +434,7 @@ func (aggr AggrObject[K, V]) Start() error {
 }
 
 func (aggr AggrObject[K, V]) Stop() error {
-	err := aggr.ConsumerConfig.StopConsumer()
+	err := aggr.Consumer.StopConsumer()
 	if err != nil {
 		aggr.GetLogger().Error("Error stopping consumer ", zap.Any("error", err))
 		return err
