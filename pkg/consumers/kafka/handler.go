@@ -4,12 +4,13 @@ import (
 	"errors"
 	"fmt"
 	kafka2 "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"go.uber.org/zap"
 	"strings"
+	"time"
 )
 
 // Split the below function to new and start
-func (kafka *KafkaConsumerConfig) StartConsumer() (any, error) {
-	//logger, _ := zap.NewProduction()
+func (kafka *KafkaConsumerConfig) StartConsumer(logger *zap.Logger) error {
 	c, err := kafka2.NewConsumer(&kafka2.ConfigMap{
 		"bootstrap.servers":                  strings.Join(kafka.BootstrapServers, ","), // Kafka broker address
 		"group.id":                           kafka.GroupId,                             // Consumer group ID
@@ -23,105 +24,75 @@ func (kafka *KafkaConsumerConfig) StartConsumer() (any, error) {
 	})
 
 	if err != nil {
-		fmt.Println("Failed to create consumer, error : ", err.Error())
-		return nil, errors.New(fmt.Sprintf("Failed to create consumer, error : ", err.Error()))
+		logger.Error("Failed to create consumer, error : " + err.Error())
+		return errors.New(fmt.Sprintf("Failed to create consumer, error : ", err.Error()))
 	}
 
-	fmt.Println("Created Consumer!, consumer : ", c)
+	logger.Info("Created Consumer!, consumer : " + c.String())
 
 	err = c.SubscribeTopics(kafka.TopicNames, nil)
 	if err != nil {
-		fmt.Println("Error at subscribing to the topic, Topic : ", kafka.TopicNames, " Error : ", err.Error())
-		return nil, errors.New(fmt.Sprint("Error at subscribing to the topic, Topic : ", kafka.TopicNames, " Error : ", err.Error()))
+		logger.Error("Error at subscribing to the topic, Topic : " + strings.Join(kafka.TopicNames, ",") + " Error : " + err.Error())
+		return errors.New(fmt.Sprint("Error at subscribing to the topic, Topic : ", kafka.TopicNames, " Error : ", err.Error()))
 	}
 
 	kafka.consumer = c
-	return nil, nil
+	return nil
 }
 
-func (kafka *KafkaConsumerConfig) GetOneMessage() (any, error) {
-	//if kafka.consumer == nil {
-	//	_, err := kafka.StartConsumer()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//}
-
-	for {
-		event := kafka.consumer.Poll(kafka.PollTimeoutMs)
-		if event == nil {
-			return nil, errors.New("Didn't receive any messages in the defined polling interval " + fmt.Sprintf("%d", kafka.PollTimeoutMs))
-		} else {
-			switch e := event.(type) {
-			case *kafka2.Message:
-				return e, nil
-			case kafka2.Error:
-				return nil, errors.New("Kafka error : " + e.Error())
-			case kafka2.PartitionEOF:
-				fmt.Printf("%% Reached %v\n", e)
-				continue
-			default:
-				continue
-			}
-		}
-	}
-}
-
-func (kafka *KafkaConsumerConfig) GetMessages(size int) (any, error) {
-	//if kafka.consumer == nil {
-	//	_, err := kafka.StartConsumer()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//}
+func (kafka *KafkaConsumerConfig) GetMessages(logger *zap.Logger, size int, time *time.Timer) (any, error) {
 	messages := make([]*kafka2.Message, 0)
 	for {
-		event := kafka.consumer.Poll(kafka.PollTimeoutMs)
-		if event == nil {
-			if len(messages) > 0 {
-				return messages, nil
-			}
-			return nil, errors.New("Didn't receive any messages in the defined polling interval " + fmt.Sprintf("%d", kafka.PollTimeoutMs))
-		} else {
-			switch e := event.(type) {
-			case *kafka2.Message:
-				messages = append(messages, e)
-				if size >= len(messages) {
+		select {
+		case <-time.C:
+			return nil, nil
+		default:
+			event := kafka.consumer.Poll(kafka.PollTimeoutMs)
+			if event == nil {
+				if len(messages) > 0 {
 					return messages, nil
-				} else {
+				}
+			} else {
+				switch e := event.(type) {
+				case *kafka2.Message:
+					messages = append(messages, e)
+					if size >= len(messages) {
+						return messages, nil
+					} else {
+						continue
+					}
+				case kafka2.Error:
+					logger.Error("kafka error : " + e.Error())
+					return nil, errors.New("Kafka error : " + e.Error())
+				case kafka2.PartitionEOF:
+					logger.Error("%% Reached %v" + e.String())
+					continue
+				default:
 					continue
 				}
-			case kafka2.Error:
-				return nil, errors.New("Kafka error : " + e.Error())
-			case kafka2.PartitionEOF:
-				fmt.Printf("%% Reached %v\n", e)
-				continue
-			default:
-				continue
 			}
 		}
 	}
 }
 
-func (kafka *KafkaConsumerConfig) CommitMessages() error {
-
-	//kafka.consumer.Commit()
+func (kafka *KafkaConsumerConfig) CommitMessages(logger *zap.Logger) error {
 	var errorString string
 	topicPartitions, err := kafka.consumer.Commit()
 	if err != nil {
 		for _, topicPartition := range topicPartitions {
+			logger.Error(fmt.Sprintf("Error committing offset, Topic : %s Offset : %s Partition : %d", *topicPartition.Topic, topicPartition.Offset.String(), topicPartition.Partition))
 			errorString += fmt.Sprintf("Error committing offset, Topic : %s Offset : %s Partition : %d", *topicPartition.Topic, topicPartition.Offset.String(), topicPartition.Partition)
-			//panic(topicPartition)
 		}
 		return errors.New(errorString)
 	}
 	return nil
 }
 
-func (kafka *KafkaConsumerConfig) StopConsumer() error {
+func (kafka *KafkaConsumerConfig) StopConsumer(logger *zap.Logger) error {
 	err := kafka.consumer.Close()
 	if err != nil {
-		return errors.New("error while cosing the consumer, error : " + err.Error())
+		logger.Error("error while closing the consumer, error : " + err.Error())
+		return errors.New("error while closing the consumer, error : " + err.Error())
 	}
 	kafka.consumer = nil
 	return err

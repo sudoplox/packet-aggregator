@@ -33,11 +33,10 @@ type AggrObject[K comparable, V any] struct {
 }
 
 type Consumer interface {
-	StartConsumer() (any, error)
-	GetOneMessage() (any, error)
-	GetMessages(int) (any, error)
-	CommitMessages() error
-	StopConsumer() error
+	StartConsumer(*zap.Logger) error
+	GetMessages(*zap.Logger, int, *time.Timer) (any, error)
+	CommitMessages(*zap.Logger) error
+	StopConsumer(*zap.Logger) error
 }
 
 type KeyValueExtractor[K comparable, V any] interface {

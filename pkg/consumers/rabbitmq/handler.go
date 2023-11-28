@@ -4,30 +4,26 @@ import (
 	"errors"
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.uber.org/zap"
+	"time"
 )
 
-//func (rmq RmqConsumerConfig)StartConsumer()
-
-func (rmq *RmqConsumerConfig) StartConsumer() (any, error) {
+func (rmq *RmqConsumerConfig) StartConsumer(logger *zap.Logger) error {
 	connection, err := amqp.Dial(rmq.BootstrapServer)
 	if err != nil {
-		fmt.Println("Error while connecting to rmq server, err : ", err.Error())
-		return nil, errors.New("Error while connecting to rmq server, err : " + err.Error())
+		logger.Error("Error while connecting to rmq server, err : " + err.Error())
+		return errors.New("Error while connecting to rmq server, err : " + err.Error())
 	}
 
-	fmt.Println("Successfully established connection to server " + rmq.BootstrapServer)
+	logger.Info("Successfully established connection to server " + rmq.BootstrapServer)
 	rmq.connection = connection
-	//defer connection.Close()
 
 	channel, err := connection.Channel()
 	if err != nil {
-		fmt.Println("Error while forming the channel connection to rmq server, err : ", err.Error())
-		return nil, errors.New("Error while forming the channel connection to rmq server, err : " + err.Error())
+		logger.Info("Error while forming the channel connection to rmq server, err : " + err.Error())
+		return errors.New("Error while forming the channel connection to rmq server, err : " + err.Error())
 	}
 	rmq.channel = channel
-	//defer channel.Close()
-
-	// queue declaration
 
 	queue, err := channel.QueueDeclare(
 		rmq.QueueName,
@@ -39,8 +35,8 @@ func (rmq *RmqConsumerConfig) StartConsumer() (any, error) {
 	)
 
 	if err != nil {
-		fmt.Println("Error while forming queue, err : ", err.Error())
-		return nil, errors.New("Error while forming queue, err : " + err.Error())
+		logger.Error("Error while forming queue, err : " + err.Error())
+		return errors.New("Error while forming queue, err : " + err.Error())
 	}
 
 	rmq.queue = &queue
@@ -58,55 +54,62 @@ func (rmq *RmqConsumerConfig) StartConsumer() (any, error) {
 	)
 
 	if err != nil {
-		fmt.Printf("Error while forming consumer channel to rmq for server : %s queue : %s err : %s", rmq.BootstrapServer, queue.Name, err.Error())
-		return nil, errors.New(fmt.Sprintf("Error while forming consumer channel to rmq for server : %s queue : %s err : %s", rmq.BootstrapServer, queue.Name, err.Error()))
+		logger.Error(fmt.Sprintf("Error while forming consumer channel to rmq for server : %s queue : %s err : %s", rmq.BootstrapServer, queue.Name, err.Error()))
+		return errors.New(fmt.Sprintf("Error while forming consumer channel to rmq for server : %s queue : %s err : %s", rmq.BootstrapServer, queue.Name, err.Error()))
 	}
 
 	rmq.messages = &messages
 
-	return nil, nil
-}
-func (rmq *RmqConsumerConfig) GetOneMessage() (any, error) {
-	messagesChan := *(rmq.messages)
-	for message := range messagesChan {
-		rmq.currentMessage = &message
-		return message, nil
-	}
-	return nil, nil
+	return nil
 }
 
-func (rmq *RmqConsumerConfig) GetMessages(size int) (any, error) {
+func (rmq *RmqConsumerConfig) GetMessages(logger *zap.Logger, size int, timer *time.Timer) (any, error) {
 	messagesChan := *(rmq.messages)
 	messages := make([]amqp.Delivery, 0)
+	timeOut := false
+	go func(timerCheck *bool) {
+		for {
+			select {
+			case <-timer.C:
+				*timerCheck = true
+			}
+		}
+	}(&timeOut)
 	for message := range messagesChan {
-		rmq.currentMessage = &message
-		messages = append(messages, message)
-		if len(messages) >= size {
+		if !timeOut {
+			rmq.currentMessage = &message
+			messages = append(messages, message)
+			if len(messages) >= size {
+				return messages, nil
+			}
+		} else {
 			return messages, nil
 		}
 	}
-	return nil, nil
+	return messages, nil
 }
-func (rmq *RmqConsumerConfig) CommitMessages() error {
+
+func (rmq *RmqConsumerConfig) CommitMessages(logger *zap.Logger) error {
 	if !rmq.ConsumerAutoAck {
 		err := (*rmq.currentMessage).Ack(true)
 		if err != nil {
-			fmt.Printf("Error while acknowledge the messages,  message data : %s,  error : %s ", (*rmq.currentMessage).Body, err.Error())
+			logger.Info(fmt.Sprintf("Error while acknowledge the messages,  message data : %s,  error : %s ", (*rmq.currentMessage).Body, err.Error()))
 			return errors.New(fmt.Sprintf("Error while acknowledge the messages,  message data : %s,  error : %s ", (*rmq.currentMessage).Body, err.Error()))
 		}
 	}
 	return nil
 }
-func (rmq *RmqConsumerConfig) StopConsumer() error {
+func (rmq *RmqConsumerConfig) StopConsumer(logger *zap.Logger) error {
 	err := rmq.channel.Close()
 	if err != nil {
-		fmt.Println("Error while closing the connection channel , err : ", err.Error())
+		logger.Error("Error while closing the connection channel , err : " + err.Error())
 		return errors.New("Error while closing the connection channel  , err : " + err.Error())
 	}
 	err = rmq.connection.Close()
 	if err != nil {
-		fmt.Println("Error while closing the connection, err : ", err.Error())
+		logger.Error("Error while closing the connection, err : " + err.Error())
 		return errors.New("Error while closing the connection, err : " + err.Error())
 	}
+	logger.Info("Successfully closed the rmq consumer")
 	return nil
 }
