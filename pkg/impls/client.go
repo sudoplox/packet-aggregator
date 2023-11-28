@@ -21,3 +21,6 @@ func (kve RetryHandlerStruct[K, V]) RetryHandle(source any) error {
 func (kve DLQHandlerStruct[K, V]) DLQHandle(source any) error {
 	return nil
 }
+
+//
+//func (kve Aggregator)

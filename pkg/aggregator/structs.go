@@ -1,22 +1,14 @@
 package aggregator
 
 import (
+	"go.uber.org/zap"
 	"time"
 )
 
-type ConsumerConfig struct {
-	TopicNames    []string
-	PollTimeoutMs int
-
-	BootstrapServers               []string `json:"bootstrap.servers"`
-	GroupId                        string   `json:"group.id"`
-	AutoOffsetReset                string   `json:"auto.offset.reset"`
-	HeartbeatIntervalMs            int      `json:"heartbeat.interval.ms"`
-	SessionTimeoutMs               int      `json:"session.timeout.ms"`
-	TopicMetadataRefreshIntervalMs int      `json:"topic.metadata.refresh.interval.ms"`
-	PartitionAssignmentStrategy    string   `json:"partition.assignment.strategy"`
-	EnableAutoCommit               bool     `json:"enable.auto.commit"`
-	MaxPollIntervalMs              int      `json:"max.poll.interval.ms"`
+type RmqConsumerConfig struct {
+	BootstrapServer string
+	QueueName       string
+	ConsumerAutoAck bool
 }
 
 type ProducerConfig struct {
@@ -24,12 +16,10 @@ type ProducerConfig struct {
 	TopicName        string
 }
 
-type AggrConfig struct {
+type AggregationConfig struct {
 	TimeDuration time.Duration
 	MessageCount int
-
-	// Kafka Consumer Config
-	ConsumerConfig ConsumerConfig
+	Logger       *zap.Logger
 }
 
 type AggrObject[K comparable, V any] struct {
@@ -38,6 +28,15 @@ type AggrObject[K comparable, V any] struct {
 	RetryHandler[K, V]
 	// DLQHandler : Dead Letter Queue implementation
 	DLQHandler[K, V]
+	AggregatorConfig
+	Consumer
+}
+
+type Consumer interface {
+	StartConsumer(*zap.Logger) error
+	GetMessages(*zap.Logger, int, *time.Timer) (any, error)
+	CommitMessages(*zap.Logger) error
+	StopConsumer(*zap.Logger) error
 }
 
 type KeyValueExtractor[K comparable, V any] interface {
@@ -51,4 +50,15 @@ type RetryHandler[K comparable, V any] interface {
 }
 type DLQHandler[K comparable, V any] interface {
 	DLQHandle(any) error
+}
+
+type AggregatorConfig interface {
+	GetAggregatorConfig() AggregationConfig
+	CreateConsumerFromConfig() (Consumer, error)
+	GetLogger() *zap.Logger
+}
+
+type Aggregator interface {
+	Start() error
+	Stop() error
 }

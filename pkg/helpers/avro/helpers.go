@@ -15,7 +15,7 @@ import (
 // 	NativeFromBinary		->	interface | map[string]interface{}
 // 	TextualFromNative	->	[]byte
 
-func TransformAvro(from any, codec *goavro.Codec, transformType DecodeType) (msg any, err error) {
+func TransformAvro(from any, codec *goavro.Codec, transformType DecodeType) (msg interface{}, err error) {
 	switch transformType {
 	case NativeFromTextual:
 		// Convert textual Avro data (in Avro JSON format) to native Go form
