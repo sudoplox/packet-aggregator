@@ -25,7 +25,7 @@ func (kafka *KafkaConsumerConfig) StartConsumer(logger *zap.Logger) error {
 
 	if err != nil {
 		logger.Error("Failed to create consumer, error : " + err.Error())
-		return errors.New(fmt.Sprintf("Failed to create consumer, error : ", err.Error()))
+		return errors.New("Failed to create consumer, error : " + err.Error())
 	}
 
 	logger.Info("Created Consumer!, consumer : " + c.String())
@@ -45,7 +45,11 @@ func (kafka *KafkaConsumerConfig) GetMessages(logger *zap.Logger, size int, time
 	for {
 		select {
 		case <-time.C:
-			return nil, nil
+			if len(messages) > 0 {
+				return messages, nil
+			} else {
+				return nil, nil
+			}
 		default:
 			event := kafka.consumer.Poll(kafka.PollTimeoutMs)
 			if event == nil {

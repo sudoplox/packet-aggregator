@@ -2,6 +2,7 @@ package aggregator
 
 import (
 	"go.uber.org/zap"
+	"reflect"
 	"time"
 )
 
@@ -70,7 +71,11 @@ func (aggr AggrObject[K, V]) Start() error {
 					zap.Any("error", err))
 				return err
 			}
-			messagesMap[key] = append(messagesMap[key], val)
+			if val != nil {
+				if !reflect.ValueOf(val).IsZero() {
+					messagesMap[key] = append(messagesMap[key], val)
+				}
+			}
 
 			if len(messagesMap) >= aggr.AggregatorConfig.GetAggregatorConfig().MessageCount {
 				err = aggr.Delegator.Delegate(messagesMap)
